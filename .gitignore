@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+
+# Logs
+logs/*.log
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models (too large for git)
+models/*.bin
+models/*.gguf
+models/*.safetensors
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Secrets
+*.key
+*.pem
+*.crt
+secrets/

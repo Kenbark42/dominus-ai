@@ -1,0 +1,32 @@
+{
+  "service_name": "dominus-ai",
+  "version": "1.0.0",
+  "model": {
+    "name": "gpt-oss-120b",
+    "provider": "ollama",
+    "context_window": 8192,
+    "default_max_tokens": 500,
+    "min_tokens": 100
+  },
+  "bridge": {
+    "host": "0.0.0.0",
+    "port": 8090,
+    "timeout": 300,
+    "log_level": "INFO"
+  },
+  "ollama": {
+    "host": "localhost",
+    "port": 11434,
+    "api_endpoint": "http://localhost:11434/api",
+    "models": ["gpt-oss:120b"]
+  },
+  "endpoints": {
+    "public": "https://api.darkfoo.com:8001",
+    "internal": "http://localhost:8090"
+  },
+  "features": {
+    "streaming": true,
+    "tools": true,
+    "thinking_mode": true
+  }
+}
