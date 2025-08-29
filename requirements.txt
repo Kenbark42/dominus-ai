@@ -4,10 +4,15 @@
 requests>=2.31.0
 urllib3>=2.0.0
 
+# Context management
+redis>=5.0.0  # Optional but recommended for caching
+# sqlalchemy>=2.0.0  # Optional, using sqlite3 built-in for now
+
 # Optional: Enhanced features
 # langchain>=0.1.0
 # openai>=1.0.0
 # tiktoken>=0.5.0
+# chromadb>=0.4.0  # For vector search (Phase 3)
 
 # Development tools
 # pytest>=7.4.0
