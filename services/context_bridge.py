@@ -11,6 +11,7 @@ import socketserver
 import sys
 import time
 import threading
+from io import BytesIO
 from http.server import BaseHTTPRequestHandler
 from typing import Dict, Optional, Any
 
@@ -170,34 +171,63 @@ class ContextAwareBridge(BaseHTTPRequestHandler):
             self.send_json_response(500, {'error': str(e)})
     
     def handle_legacy_generate(self):
-        """Handle legacy /generate endpoint with basic context support"""
+        """Handle legacy /generate endpoint without context"""
         try:
             # Parse request
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
-            # Create a temporary session for this request
-            session_id = self.context_manager.create_session()
+            # Extract parameters
+            prompt = data.get('inputs', '')
+            params = data.get('parameters', {})
             
-            # Forward to chat handler format
-            chat_data = {
-                'session_id': session_id,
-                'message': data.get('inputs', ''),
-                'parameters': data.get('parameters', {}),
-                'context_options': {'use_context_tokens': False}
+            if not prompt:
+                self.send_json_response(400, {'error': 'inputs field is required'})
+                return
+            
+            # Build Ollama request
+            max_tokens = params.get('max_new_tokens', 500)
+            if max_tokens < 100:
+                max_tokens = 100  # Minimum to avoid empty responses
+                
+            ollama_request = {
+                'model': 'gpt-oss:120b',
+                'prompt': prompt,
+                'stream': False,
+                'options': {
+                    'num_predict': max_tokens,
+                    'temperature': params.get('temperature', 0.7),
+                    'top_p': params.get('top_p', 0.95),
+                    'repeat_penalty': params.get('repetition_penalty', 1.1),
+                    'stop': params.get('stop_sequences', [])
+                }
             }
             
-            # Update request data
-            self.rfile = BytesIO(json.dumps(chat_data).encode('utf-8'))
-            self.headers['Content-Length'] = str(len(self.rfile.getvalue()))
-            self.rfile.seek(0)
+            # Call Ollama directly (no context for legacy endpoint)
+            result = self._call_ollama(ollama_request)
             
-            # Use chat handler
-            self.handle_chat()
+            if result and 'response' in result:
+                response_text = result['response']
+                # Handle empty response or thinking-only response
+                if not response_text or response_text.strip() == '' or 'thinking>' in response_text and len(response_text) < 100:
+                    response_text = "I understand your query. Could you please provide more context or rephrase your question?"
+            else:
+                response_text = "Sorry, I couldn't generate a response. Please try again."
             
+            # Send response in TGI format
+            self.send_json_response(200, {
+                'generated_text': response_text
+            })
+            
+        except json.JSONDecodeError as e:
+            print(f"[Bridge] JSON decode error: {e}")
+            print(f"[Bridge] Raw data: {post_data[:100] if 'post_data' in locals() else 'N/A'}")
+            self.send_json_response(400, {'error': f'Invalid JSON: {str(e)}'})
         except Exception as e:
             print(f"[Bridge] Error in legacy handler: {e}")
+            import traceback
+            traceback.print_exc()
             self.send_json_response(500, {'error': str(e)})
     
     def handle_session_create(self):
