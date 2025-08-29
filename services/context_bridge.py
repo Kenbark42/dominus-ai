@@ -355,7 +355,7 @@ from io import BytesIO
 
 def main():
     """Main entry point"""
-    PORT = 8091  # Different port for testing alongside existing bridge
+    PORT = 8090  # Primary bridge port
     
     # Configuration
     config = {

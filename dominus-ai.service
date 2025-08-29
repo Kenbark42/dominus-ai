@@ -10,7 +10,7 @@ Group=ken
 WorkingDirectory=/home/ken/ai/dominus-ai/services
 Environment="PYTHONUNBUFFERED=1"
 ExecStartPre=/bin/bash -c 'until curl -s http://localhost:11434/api/tags > /dev/null; do echo "Waiting for Ollama..."; sleep 5; done'
-ExecStart=/usr/bin/python3 /home/ken/ai/dominus-ai/services/ollama-bridge-v2.py
+ExecStart=/usr/bin/python3 /home/ken/ai/dominus-ai/services/context_bridge.py
 Restart=always
 RestartSec=10
 StandardOutput=append:/home/ken/ai/dominus-ai/logs/bridge.log
