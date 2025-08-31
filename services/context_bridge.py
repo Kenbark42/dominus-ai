@@ -18,6 +18,14 @@ from typing import Dict, Optional, Any
 # Import context manager
 from context_manager import get_context_manager, Message
 
+# Import RAG engine
+try:
+    from rag_engine import get_rag_engine
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    print("[Bridge] RAG engine not available - some features disabled")
+
 
 class ContextAwareBridge(BaseHTTPRequestHandler):
     """HTTP handler with context management capabilities"""
@@ -50,6 +58,8 @@ class ContextAwareBridge(BaseHTTPRequestHandler):
         # Handle different endpoints
         if self.path == '/chat':
             self.handle_chat()
+        elif self.path == '/chat/rag':
+            self.handle_rag_chat()
         elif self.path == '/generate':
             # Legacy endpoint - convert to chat format
             self.handle_legacy_generate()
@@ -57,6 +67,12 @@ class ContextAwareBridge(BaseHTTPRequestHandler):
             self.handle_session_create()
         elif self.path == '/session/info':
             self.handle_session_info()
+        elif self.path == '/ingest':
+            self.handle_document_ingest()
+        elif self.path == '/search':
+            self.handle_search()
+        elif self.path == '/collections':
+            self.handle_collections()
         elif self.path == '/health':
             self.handle_health()
         else:
@@ -66,6 +82,8 @@ class ContextAwareBridge(BaseHTTPRequestHandler):
         """Handle GET requests"""
         if self.path == '/health':
             self.handle_health()
+        elif self.path == '/collections':
+            self.handle_collections()
         else:
             self.send_error(404, "Endpoint not found")
     
@@ -187,7 +205,7 @@ class ContextAwareBridge(BaseHTTPRequestHandler):
                 return
             
             # Build Ollama request
-            max_tokens = params.get('max_new_tokens', 500)
+            max_tokens = params.get('max_new_tokens', 2048)  # Increased from 500
             if max_tokens < 100:
                 max_tokens = 100  # Minimum to avoid empty responses
                 
@@ -313,7 +331,7 @@ class ContextAwareBridge(BaseHTTPRequestHandler):
                 'top_p': params.get('top_p', 0.95),
                 'top_k': params.get('top_k', 40),
                 'num_predict': max_tokens,
-                'num_ctx': 8192,
+                'num_ctx': 32768,  # Increased from 8192
                 'repeat_penalty': params.get('repetition_penalty', 1.1),
                 'stop': params.get('stop_sequences', []),
             }
@@ -335,7 +353,7 @@ class ContextAwareBridge(BaseHTTPRequestHandler):
                 'top_p': params.get('top_p', 0.95),
                 'top_k': params.get('top_k', 40),
                 'num_predict': max_tokens,
-                'num_ctx': 8192,
+                'num_ctx': 32768,  # Increased from 8192
                 'repeat_penalty': params.get('repetition_penalty', 1.1),
                 'stop': params.get('stop_sequences', []),
             }
@@ -350,12 +368,184 @@ class ContextAwareBridge(BaseHTTPRequestHandler):
                 headers={'Content-Type': 'application/json'}
             )
             
-            with urllib.request.urlopen(req, timeout=300) as response:
+            with urllib.request.urlopen(req, timeout=600) as response:  # Increased timeout
                 return json.loads(response.read().decode('utf-8'))
                 
         except Exception as e:
             print(f"[Bridge] Ollama call error: {e}")
             return None
+    
+    def handle_rag_chat(self):
+        """Handle RAG-enhanced chat endpoint"""
+        if not RAG_AVAILABLE:
+            self.send_json_response(503, {'error': 'RAG engine not available'})
+            return
+            
+        try:
+            # Parse request
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            # Extract parameters
+            session_id = data.get('session_id')
+            message = data.get('message', '')
+            params = data.get('parameters', {})
+            collection = data.get('collection', 'default')
+            use_rag = data.get('use_rag', True)
+            
+            if not message:
+                self.send_json_response(400, {'error': 'Message is required'})
+                return
+            
+            # Get or create session
+            session_id = self.context_manager.get_or_create_session(session_id)
+            
+            # Search for relevant documents if RAG is enabled
+            augmented_prompt = message
+            retrieved_docs = []
+            
+            if use_rag:
+                rag_engine = get_rag_engine()
+                # Search for relevant documents
+                retrieved_docs = rag_engine.search(
+                    collection_name=collection,
+                    query=message,
+                    k=params.get('rag_k', 3)
+                )
+                
+                # Augment prompt with retrieved documents
+                if retrieved_docs:
+                    augmented_prompt = rag_engine.augment_prompt(message, retrieved_docs)
+            
+            # Add user message to history
+            self.context_manager.add_message(session_id, 'user', message)
+            
+            # Build context from history and RAG
+            context = self.context_manager.get_context(session_id, max_tokens=4000)
+            full_prompt = f"{context}\n\nUser: {augmented_prompt}\nAssistant:"
+            
+            # Call Ollama
+            request_data = self._build_initial_request(full_prompt, params)
+            response_data = self._call_ollama(request_data)
+            
+            if response_data and 'response' in response_data:
+                response_text = response_data['response']
+                
+                # Add assistant response to history
+                self.context_manager.add_message(session_id, 'assistant', response_text)
+                
+                result = {
+                    'response': response_text,
+                    'session_id': session_id,
+                    'message_id': None,
+                    'retrieved_documents': len(retrieved_docs),
+                    'usage': {
+                        'prompt_tokens': response_data.get('prompt_eval_count', 0),
+                        'completion_tokens': response_data.get('eval_count', 0),
+                        'total_tokens': response_data.get('prompt_eval_count', 0) + response_data.get('eval_count', 0),
+                        'response_time': response_data.get('total_duration', 0) / 1e9
+                    }
+                }
+                
+                self.send_json_response(200, result)
+            else:
+                self.send_json_response(500, {'error': 'Failed to generate response'})
+                
+        except Exception as e:
+            print(f"[Bridge] Error in RAG chat: {e}")
+            self.send_json_response(500, {'error': str(e)})
+    
+    def handle_document_ingest(self):
+        """Handle document ingestion endpoint"""
+        if not RAG_AVAILABLE:
+            self.send_json_response(503, {'error': 'RAG engine not available'})
+            return
+            
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            collection = data.get('collection', 'default')
+            content = data.get('content', '')
+            metadata = data.get('metadata', {})
+            
+            if not content:
+                self.send_json_response(400, {'error': 'Content is required'})
+                return
+            
+            rag_engine = get_rag_engine()
+            doc_ids = rag_engine.ingest_document(
+                collection_name=collection,
+                content=content,
+                metadata=metadata
+            )
+            
+            self.send_json_response(200, {
+                'success': True,
+                'document_chunks': len(doc_ids),
+                'chunk_ids': doc_ids
+            })
+            
+        except Exception as e:
+            print(f"[Bridge] Error in document ingest: {e}")
+            self.send_json_response(500, {'error': str(e)})
+    
+    def handle_search(self):
+        """Handle semantic search endpoint"""
+        if not RAG_AVAILABLE:
+            self.send_json_response(503, {'error': 'RAG engine not available'})
+            return
+            
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            query = data.get('query', '')
+            collection = data.get('collection', 'default')
+            k = data.get('k', 5)
+            
+            if not query:
+                self.send_json_response(400, {'error': 'Query is required'})
+                return
+            
+            rag_engine = get_rag_engine()
+            results = rag_engine.search(
+                collection_name=collection,
+                query=query,
+                k=k
+            )
+            
+            self.send_json_response(200, {
+                'query': query,
+                'results': results,
+                'count': len(results)
+            })
+            
+        except Exception as e:
+            print(f"[Bridge] Error in search: {e}")
+            self.send_json_response(500, {'error': str(e)})
+    
+    def handle_collections(self):
+        """Handle collections listing endpoint"""
+        if not RAG_AVAILABLE:
+            self.send_json_response(503, {'error': 'RAG engine not available'})
+            return
+            
+        try:
+            rag_engine = get_rag_engine()
+            collections = rag_engine.list_collections()
+            
+            self.send_json_response(200, {
+                'collections': collections,
+                'count': len(collections)
+            })
+            
+        except Exception as e:
+            print(f"[Bridge] Error listing collections: {e}")
+            self.send_json_response(500, {'error': str(e)})
     
     def send_json_response(self, status: int, data: Any):
         """Send JSON response"""
@@ -403,11 +593,20 @@ def main():
     
     print(f"Starting Context-Aware Bridge on port {PORT}")
     print(f"Endpoints:")
-    print(f"  POST /chat         - Context-aware chat")
-    print(f"  POST /generate     - Legacy endpoint (limited context)")
+    print(f"  POST /chat           - Context-aware chat")
+    print(f"  POST /chat/rag       - RAG-enhanced chat")
+    print(f"  POST /generate       - Legacy endpoint (limited context)")
     print(f"  POST /session/create - Create new session")
     print(f"  POST /session/info   - Get session information")
+    print(f"  POST /ingest         - Ingest document into RAG")
+    print(f"  POST /search         - Semantic search")
+    print(f"  GET  /collections    - List document collections")
     print(f"  GET  /health         - Health check")
+    
+    if RAG_AVAILABLE:
+        print(f"\n✓ RAG Engine: Available")
+    else:
+        print(f"\n✗ RAG Engine: Not available (install chromadb)")
     
     with socketserver.TCPServer(("", PORT), ContextAwareBridge) as httpd:
         print(f"Bridge ready - Listening on port {PORT}")

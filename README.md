@@ -1,59 +1,91 @@
-# Dominus AI
+# Dominus AI - Advanced AI Service Infrastructure
 
-An independent AI service infrastructure providing LLM capabilities through a unified API endpoint.
+An independent AI service infrastructure providing context-aware LLM capabilities, RAG (Retrieval Augmented Generation), and extensible knowledge management.
 
-## Overview
+## 🚀 Overview
 
-Dominus AI is a standalone AI service that provides:
-- GPT-OSS-120B model deployment via Ollama
-- TGI-compatible REST API bridge
-- Model management and orchestration
-- Tool integration capabilities
+Dominus AI is a sophisticated standalone AI service that provides:
+- **GPT-OSS-120B** model deployment via Ollama (65GB, 8K context)
+- **Context-aware conversations** with session persistence
+- **RAG system** with ChromaDB for document retrieval
+- **TGI-compatible REST API** bridge
+- **Extensible plugin architecture** for future capabilities
 
-## Architecture
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────┐
-│         External Clients            │
-│    (darkfoo.com, other services)    │
-└────────────┬────────────────────────┘
-             │
-             ▼
-     ┌───────────────┐
-     │  HTTPS/8001   │
-     │   (nginx)     │
-     └───────┬───────┘
-             │
-             ▼
-     ┌───────────────┐
-     │  Bridge/8090  │
-     │  (Python)     │
-     └───────┬───────┘
-             │
-             ▼
-     ┌───────────────┐
-     │ Ollama/11434  │
-     │   (LLM API)   │
-     └───────┬───────┘
-             │
-             ▼
-     ┌───────────────┐
-     │  GPT-OSS-120B │
-     │    (Model)    │
-     └───────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                     DOMINUS AI PLATFORM                   │
+├──────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
+│  │   Ollama    │  │   Context   │  │     RAG     │      │
+│  │  GPT-OSS    │◄─┤   Manager   ├─►│   Engine    │      │
+│  │    120B     │  │  (SQLite)   │  │ (ChromaDB)  │      │
+│  └─────────────┘  └─────────────┘  └─────────────┘      │
+│         ▲                │                 │              │
+│         └────────────────┼─────────────────┘              │
+│                          ▼                                │
+│               ┌──────────────────┐                        │
+│               │  Context Bridge  │                        │
+│               │   (Port 8090)    │                        │
+│               └──────────────────┘                        │
+│                          │                                │
+│                          ▼                                │
+│               ┌──────────────────┐                        │
+│               │   NGINX Proxy    │                        │
+│               │  (Port 8001 SSL) │                        │
+│               └──────────────────┘                        │
+│                          │                                │
+│                          ▼                                │
+│                  External Clients                         │
+│            (darkfoo.com, other services)                  │
+└──────────────────────────────────────────────────────────┘
 ```
 
-## Components
+## 📁 Project Structure
 
-### Services
-- **ollama-bridge-v2.py**: Main TGI-compatible bridge service (port 8090)
-- **ollama-bridge-tools.py**: Tool-enhanced bridge for function calling
-- **tool_system.py**: Tool integration and management system
+```
+/home/ken/ai/dominus-ai/
+├── services/
+│   ├── context_bridge.py      # Main API server with context awareness
+│   ├── context_manager.py     # Session and conversation management
+│   ├── rag_engine.py          # RAG system with ChromaDB
+│   └── document_ingestion.py  # Document processing pipeline (coming)
+├── data/
+│   ├── chromadb/              # Vector database storage
+│   ├── sessions.db            # SQLite conversation history
+│   └── cache/                 # Embedding cache
+├── logs/
+│   ├── bridge.log             # Service logs
+│   └── bridge-error.log       # Error logs
+├── docs/
+│   └── PHASE3_RAG_ARCHITECTURE.md  # RAG system design
+└── scripts/
+    └── start-services.sh      # Service management scripts
+```
 
-### Configuration
-- Port 8090: Bridge service (TGI-compatible API)
-- Port 11434: Ollama native API
-- Port 8001: Public HTTPS endpoint (via nginx proxy)
+## 🔌 Core Services
+
+### Context Bridge (`context_bridge.py`)
+- **Port**: 8090
+- **Features**: Context-aware conversations, session management, RAG integration
+- **Endpoints**: `/chat`, `/generate`, `/session/*`, `/health`
+
+### Context Manager (`context_manager.py`)
+- **Storage**: SQLite database
+- **Features**: Session persistence, conversation history, token tracking
+- **Capacity**: Unlimited sessions with automatic cleanup
+
+### RAG Engine (`rag_engine.py`)
+- **Vector DB**: ChromaDB with persistent storage
+- **Embeddings**: sentence-transformers (all-MiniLM-L6-v2)
+- **Features**: Document chunking, semantic search, collection management
+
+### Network Configuration
+- **Port 8090**: Internal bridge service (TGI-compatible API)
+- **Port 11434**: Ollama native API
+- **Port 8001**: Public HTTPS endpoint (via nginx proxy)
 
 ## Installation
 
